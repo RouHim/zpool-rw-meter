@@ -163,4 +163,94 @@ mod tests {
         assert_eq!(rate1, 50.0);
         assert_eq!(rate2, 50.0);
     }
+
+    #[test]
+    fn test_zero_rate_calculation() {
+        let mut calculator = RateCalculator::new();
+        let now = Instant::now();
+
+        // Same value should result in zero rate
+        calculator.update("test", 100, now);
+        let rate = calculator.calculate_rate("test", 100, now + Duration::from_secs(1)).unwrap();
+
+        assert_eq!(rate, 0.0);
+    }
+
+    #[test]
+    fn test_negative_rate_calculation() {
+        let mut calculator = RateCalculator::new();
+        let now = Instant::now();
+
+        // Decreasing value should result in negative rate
+        calculator.update("test", 200, now);
+        let rate = calculator.calculate_rate("test", 100, now + Duration::from_secs(1)).unwrap();
+
+        assert_eq!(rate, -100.0);
+    }
+
+    #[test]
+    fn test_has_previous_data() {
+        let mut calculator = RateCalculator::new();
+        let now = Instant::now();
+
+        // Initially no data
+        assert!(!calculator.has_previous_data("test"));
+
+        // After first update, should have data
+        calculator.update("test", 100, now);
+        assert!(calculator.has_previous_data("test"));
+
+        // Non-existent key should not have data
+        assert!(!calculator.has_previous_data("nonexistent"));
+    }
+
+    #[test]
+    fn test_reset_functionality() {
+        let mut calculator = RateCalculator::new();
+        let now = Instant::now();
+
+        // Add some data
+        calculator.update("test1", 100, now);
+        calculator.update("test2", 200, now);
+
+        assert!(calculator.has_previous_data("test1"));
+        assert!(calculator.has_previous_data("test2"));
+
+        // Reset should clear all data
+        calculator.reset();
+
+        assert!(!calculator.has_previous_data("test1"));
+        assert!(!calculator.has_previous_data("test2"));
+    }
+
+    #[test]
+    fn test_multiple_measurements() {
+        let mut calculator = RateCalculator::new();
+        let start = Instant::now();
+
+        // First measurement
+        calculator.update("ops", 0, start);
+
+        // Simulate multiple measurements over time
+        let measurements = vec![
+            (100, Duration::from_millis(100)),
+            (250, Duration::from_millis(200)),
+            (400, Duration::from_millis(100)),
+            (600, Duration::from_millis(150)),
+        ];
+
+        for (value, delay) in measurements {
+            thread::sleep(delay);
+            let now = Instant::now();
+            let rate = calculator.calculate_and_update("ops", value, now);
+
+            // Should have a rate after first update
+            if calculator.has_previous_data("ops") {
+                assert!(rate.is_some());
+                assert!(rate.unwrap() >= 0.0); // Rate should be positive for increasing values
+            } else {
+                assert!(rate.is_none());
+            }
+        }
+    }
 }

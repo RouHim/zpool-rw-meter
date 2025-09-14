@@ -1,5 +1,6 @@
 //! ZFS statistics collection and data structures
 
+pub mod error;
 pub mod pools;
 pub mod rate_calculator;
 pub mod stats;
