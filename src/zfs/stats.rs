@@ -530,7 +530,10 @@ mod tests {
         let result = collector.parse_arcstat_output(output);
         assert!(result.is_err());
 
-        if let Err(ZfsError::InvalidFormat { expected, received, .. }) = result {
+        if let Err(ZfsError::InvalidFormat {
+            expected, received, ..
+        }) = result
+        {
             assert_eq!(expected, "at least 5 space-separated numbers");
             assert_eq!(received, "3 parts");
         } else {
@@ -567,8 +570,14 @@ mod tests {
 
         assert_eq!(collector.parse_bandwidth("1K").unwrap(), 1024);
         assert_eq!(collector.parse_bandwidth("2M").unwrap(), 2 * 1024 * 1024);
-        assert_eq!(collector.parse_bandwidth("1.5G").unwrap(), (1.5 * 1024.0 * 1024.0 * 1024.0) as u64);
-        assert_eq!(collector.parse_bandwidth("1T").unwrap(), 1024 * 1024 * 1024 * 1024);
+        assert_eq!(
+            collector.parse_bandwidth("1.5G").unwrap(),
+            (1.5 * 1024.0 * 1024.0 * 1024.0) as u64
+        );
+        assert_eq!(
+            collector.parse_bandwidth("1T").unwrap(),
+            1024 * 1024 * 1024 * 1024
+        );
     }
 
     #[test]
@@ -747,10 +756,11 @@ mod tests {
         assert_eq!(collector.parse_bandwidth("1m").unwrap(), 1024 * 1024);
 
         // Test very large numbers
-        assert_eq!(collector.parse_bandwidth("1000T").unwrap(), 1000 * 1024u64 * 1024 * 1024 * 1024);
+        assert_eq!(
+            collector.parse_bandwidth("1000T").unwrap(),
+            1000 * 1024u64 * 1024 * 1024 * 1024
+        );
     }
-
-
 
     #[test]
     fn test_parse_slog_device_from_status() {

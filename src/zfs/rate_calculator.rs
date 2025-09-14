@@ -171,7 +171,9 @@ mod tests {
 
         // Same value should result in zero rate
         calculator.update("test", 100, now);
-        let rate = calculator.calculate_rate("test", 100, now + Duration::from_secs(1)).unwrap();
+        let rate = calculator
+            .calculate_rate("test", 100, now + Duration::from_secs(1))
+            .unwrap();
 
         assert_eq!(rate, 0.0);
     }
@@ -183,7 +185,9 @@ mod tests {
 
         // Decreasing value should result in zero rate (due to saturating_sub protection)
         calculator.update("test", 200, now);
-        let rate = calculator.calculate_rate("test", 100, now + Duration::from_secs(1)).unwrap();
+        let rate = calculator
+            .calculate_rate("test", 100, now + Duration::from_secs(1))
+            .unwrap();
 
         // saturating_sub prevents negative rates, so we get 0 instead of -100
         assert_eq!(rate, 0.0);
@@ -264,13 +268,17 @@ mod tests {
         calculator.update("test", u64::MAX, now);
 
         // Decreasing from max should use saturating_sub (result should be 0)
-        let rate = calculator.calculate_rate("test", 0, now + Duration::from_secs(1)).unwrap();
+        let rate = calculator
+            .calculate_rate("test", 0, now + Duration::from_secs(1))
+            .unwrap();
         assert_eq!(rate, 0.0); // saturating_sub prevents underflow
 
         // Test with very large values
         calculator.reset();
         calculator.update("large", u64::MAX / 2, now);
-        let rate = calculator.calculate_rate("large", u64::MAX, now + Duration::from_secs(1)).unwrap();
+        let rate = calculator
+            .calculate_rate("large", u64::MAX, now + Duration::from_secs(1))
+            .unwrap();
         assert!(rate > 0.0);
     }
 
@@ -295,7 +303,9 @@ mod tests {
 
         // Test with very large value changes
         calculator.update("bandwidth", 0, now);
-        let rate = calculator.calculate_rate("bandwidth", 1_000_000_000, now + Duration::from_millis(1)).unwrap();
+        let rate = calculator
+            .calculate_rate("bandwidth", 1_000_000_000, now + Duration::from_millis(1))
+            .unwrap();
 
         // Should be 1e12 bytes per second
         assert!((rate - 1_000_000_000_000.0).abs() < 1_000_000.0);
@@ -361,7 +371,9 @@ mod tests {
         let rate = calculator.calculate_and_update("", 100, now);
         assert!(rate.is_none());
 
-        let rate2 = calculator.calculate_and_update("", 200, now + Duration::from_secs(1)).unwrap();
+        let rate2 = calculator
+            .calculate_and_update("", 200, now + Duration::from_secs(1))
+            .unwrap();
         assert_eq!(rate2, 100.0);
     }
 
@@ -375,7 +387,9 @@ mod tests {
         let rate = calculator.calculate_and_update(key, 50, now);
         assert!(rate.is_none());
 
-        let rate2 = calculator.calculate_and_update(key, 100, now + Duration::from_secs(1)).unwrap();
+        let rate2 = calculator
+            .calculate_and_update(key, 100, now + Duration::from_secs(1))
+            .unwrap();
         assert_eq!(rate2, 50.0);
     }
 }
