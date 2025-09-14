@@ -1,15 +1,17 @@
-# ZFS Cache Performance Monitor
+# ZFS Cache Performance Monitor (Rust)
 
-A real-time monitoring tool for ZFS cache layers (ARC, L2ARC, SLOG) with visual progress bars and performance indicators.
+A high-performance, real-time monitoring tool for ZFS cache layers (ARC, L2ARC, SLOG) written in Rust with visual progress bars and performance indicators.
 
 ## Features
 
-- **Real-time monitoring** of all ZFS cache layers
+- **Real-time monitoring** of all ZFS cache layers with accurate rate calculations
 - **Visual progress bars** with Unicode characters
 - **Color-coded performance indicators** (excellent/good/fair/poor)
 - **Automatic pool detection** or manual selection
 - **Configurable refresh intervals**
 - **Comprehensive error handling** and graceful fallbacks
+- **Async I/O** for high performance and responsiveness
+- **Demo mode** for testing without ZFS installation
 
 ## Cache Layers Monitored
 
@@ -17,15 +19,15 @@ A real-time monitoring tool for ZFS cache layers (ARC, L2ARC, SLOG) with visual 
 - Primary RAM-based cache
 - Hit/miss rates and performance rating
 - Cache size vs target size with utilization
-- Read operations per second
+- Read operations per second (calculated rates)
 
 ### 💾 L2ARC (Level 2 ARC)
 - Secondary SSD-based read cache
 - Hit/miss rates for L2 cache
 - Cache size and read throughput
-- Operations per second
+- Operations per second (calculated rates)
 
-### ✏️ SLOG (Synchronous Write Log)
+### 🟡 SLOG (Synchronous Write Log)
 - Dedicated write cache device
 - Device utilization and write operations
 - Write throughput and latency metrics
@@ -33,77 +35,90 @@ A real-time monitoring tool for ZFS cache layers (ARC, L2ARC, SLOG) with visual 
 
 ## Requirements
 
-- **ZFS utilities**: `zpool`, `arcstat`
-- **System tools**: `bc`, `awk`, `grep`
-- **Optional**: `iostat` (for enhanced SLOG monitoring)
+- **Rust toolchain** (1.70+ recommended)
+- **ZFS utilities**: `zpool`, `arcstat` (for live mode)
+- **System access**: `/proc/spl/kstat/zfs/arcstats` (for live mode)
 
-### Installation on Ubuntu/Debian
+### Installation
+
 ```bash
-sudo apt update
-sudo apt install zfsutils-linux bc
+# Clone the repository
+git clone <repository-url>
+cd zpool-rw-meter
+
+# Build the project
+cargo build --release
+
+# Run in demo mode (no ZFS required)
+DEMO_MODE=true cargo run
+
+# Or run live mode on ZFS systems
+cargo run
 ```
 
-### Installation on RHEL/CentOS/Fedora
+### System Dependencies (for live mode)
+
+#### Ubuntu/Debian
 ```bash
-sudo dnf install zfs bc
+sudo apt update
+sudo apt install zfsutils-linux
+```
+
+#### RHEL/CentOS/Fedora
+```bash
+sudo dnf install zfs
 # or on older systems:
-sudo yum install zfs bc
+sudo yum install zfs
 ```
 
 ## Usage
 
 ```bash
-# Auto-detect pool, 2-second refresh
-./zfs-cache-monitor.sh
+# Build and run with default settings (demo mode)
+DEMO_MODE=true cargo run
 
-# Monitor specific pool
-./zfs-cache-monitor.sh tank
+# Monitor specific pool with default 2-second refresh
+cargo run pool_name
 
-# Custom refresh interval
-./zfs-cache-monitor.sh tank 1
+# Custom refresh interval (1 second)
+cargo run pool_name 1
+
+# Live mode on ZFS systems (requires ZFS installation)
+cargo run
 
 # Show help
-./zfs-cache-monitor.sh --help
-
-# Enable debug mode for troubleshooting
-DEBUG=true ./zfs-cache-monitor.sh
-
-# Run in demo mode (for testing without ZFS)
-DEMO_MODE=true ./zfs-cache-monitor.sh
+cargo run -- --help
 ```
 
 ## Environment Variables
 
-- **`DEBUG=true`** - Enable verbose debugging output to troubleshoot `arcstat` issues
-- **`DEMO_MODE=true`** - Run with realistic sample data (useful for testing or demo purposes)
+- **`DEMO_MODE=true`** - Run with realistic sample data (useful for testing or demo purposes without ZFS)
 
 ## Example Output
 
 ```
-═══════════════════════════════════════════════════════════════════
-🔍 ZFS Cache Performance Monitor
-═══════════════════════════════════════════════════════════════════
-Pool: tank | Refresh: 2s | Time: 2025-09-14 15:30:45
+======================= 🔍 ZFS Cache Performance Monitor ========================
+Pool: data | Refresh: 2s | Time: 2025-09-14 17:10:08
 
 📊 ARC (Primary RAM Cache)
-  Hit Rate:    ████████████████████ 89.2% (Excellent)
-  Cache Size:  ██████████████████░░ 87.3% (15.2G/17.4G)
-  Read Ops:    1,247/s
+    Hit Rate:    100 (Excellent) [####################] 100.0%
+    Cache Size:  46.3G/46.5G [####################] 99.6%
+    Read Ops:    0/s
 
 💾 L2ARC (Secondary SSD Cache)
-  Hit Rate:    ████████████████░░░░ 78.4% (Good)
-  Cache Size:  45.8G
-  Read Rate:   234.5M/s
-  Operations:  892/s
+    Hit Rate:    73.4304932735426 (Good) [###############.....] 73.4%
+    Cache Size:  553.7G
+    Read Rate:   0 B/s
+    Operations:  0/s
 
-✏️ SLOG (Synchronous Write Log)
-  Device:      nvme1n1p3
-  Utilization: ██████░░░░░░░░░░░░░░ 28.7%
-  Write Ops:   156/s
-  Write Rate:  12.3M/s
-  Latency:     2.1ms (Excellent)
+🟡 SLOG (Synchronous Write Log)
+    Device:      mirror-1
+    Utilization: 0 (Excellent) [....................] 0.0%
+    Write Ops:   0/s
+    Write Rate:  0 B/s
+    Latency:     0.0ms
 
-═══════════════════════════════════════════════════════════════════
+================================================================================
 Press Ctrl+C to exit | Data refreshes every 2s
 ```
 
@@ -123,9 +138,12 @@ Press Ctrl+C to exit | Data refreshes every 2s
 
 ### Missing Dependencies
 ```bash
-Error: Missing required tools: zpool arcstat
+Error: Failed to collect ARC statistics from all sources
 ```
-Install ZFS utilities for your distribution (see Requirements section).
+This error occurs when running in live mode without ZFS installed. Use demo mode instead:
+```bash
+DEMO_MODE=true cargo run
+```
 
 ### No ZFS Pools Found
 ```bash
@@ -146,41 +164,74 @@ Run with appropriate privileges or add user to disk group:
 sudo usermod -a -G disk $USER
 ```
 
-### Script Hangs or Shows Only Header
-If the script displays the header but hangs without showing data:
-
+### Compilation Issues
+If you encounter compilation errors:
 ```bash
-# Enable debug mode to see what's happening
-DEBUG=true ./zfs-cache-monitor.sh
+# Update Rust toolchain
+rustup update
 
-# Try demo mode to verify the script works
-DEMO_MODE=true ./zfs-cache-monitor.sh
-
-# Test arcstat manually
-arcstat 1 1
+# Clean and rebuild
+cargo clean
+cargo build
 ```
 
-**Common causes:**
-- `arcstat` command hanging (fixed with timeout protection)
-- Different `arcstat` versions with varying syntax
-- Missing ZFS kernel modules
+### Testing Without ZFS
+The application includes comprehensive demo mode for testing:
+```bash
+# Run demo mode
+DEMO_MODE=true cargo run
 
-The script includes multiple fallback methods:
-1. `arcstat -f fields 1 1` (specific fields)
-2. `arcstat 1 1` (default output)  
-3. Direct parsing from `/proc/spl/kstat/zfs/arcstats`
+# Test with different pools/intervals
+DEMO_MODE=true cargo run testpool 1
+```
+
+**Demo mode features:**
+- Realistic ZFS statistics simulation
+- All cache layers displayed
+- Rate calculations working
+- Full UI functionality
 
 ## Implementation Details
 
-- **ARC stats**: Retrieved via `arcstat` utility and `/proc/spl/kstat/zfs/arcstats`
-- **L2ARC stats**: Parsed from ZFS kernel statistics
-- **SLOG stats**: Combined `iostat` and `zpool iostat` data
-- **Visual elements**: Unicode progress bars with ANSI color codes
-- **Error handling**: Graceful fallbacks for missing devices/tools
+### Architecture
+- **Async runtime**: Tokio for high-performance concurrent I/O
+- **Modular design**: Separate modules for display, ZFS parsing, system abstraction
+- **Trait-based abstractions**: `CommandExecutor` and `FilesystemReader` for testing
+- **Rate calculation**: Custom `RateCalculator` for accurate ops/second metrics
+
+### Data Sources
+- **ARC stats**: `arcstat` utility and `/proc/spl/kstat/zfs/arcstats` parsing
+- **L2ARC stats**: Direct parsing from ZFS kernel statistics
+- **SLOG stats**: Combined `zpool status` and `zpool iostat` data
+- **Visual elements**: Unicode progress bars with terminal control sequences
+- **Error handling**: Comprehensive fallbacks and graceful degradation
+
+### Performance Features
+- **Real-time rates**: Accurate per-second calculations for all metrics
+- **Flicker-free display**: Terminal control for smooth updates
+- **Signal handling**: Graceful Ctrl+C shutdown
+- **Timeout protection**: Prevents hanging on slow commands
+
+## Migration Status
+
+This project has been successfully migrated from shell script to Rust:
+
+- ✅ **Phase 1**: Foundation & Demo Mode - Complete
+- ✅ **Phase 2**: System Abstractions - Complete
+- ✅ **Phase 3**: ZFS Statistics Engine - Complete
+- 🔄 **Phase 4**: Caching & Error Handling - In Progress
+- 🔄 **Phase 5**: Unit Tests & Real System Testing - Pending
+
+### Key Improvements in Rust Version
+- **Performance**: Async I/O with Tokio runtime
+- **Reliability**: Strong typing and comprehensive error handling
+- **Maintainability**: Modular architecture with clear separation of concerns
+- **Testing**: Trait-based abstractions enable thorough unit testing
+- **Accuracy**: Precise rate calculations for real-time metrics
 
 ## Contributing
 
-Feel free to submit issues and enhancement requests!
+Feel free to submit issues and enhancement requests! The codebase is written in Rust with a focus on performance and reliability.
 
 ## License
 

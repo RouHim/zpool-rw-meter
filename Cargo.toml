@@ -1,0 +1,12 @@
+[package]
+name = "zfs-cache-monitor-rs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+procfs = "0.16"       # For /proc filesystem access
+nix = "0.29"          # For system calls and process management
+console = "0.15"      # For terminal control and colors
+chrono = "0.4"        # For timestamp formatting
+tokio = { version = "1.0", features = ["process", "time", "rt", "rt-multi-thread", "sync", "signal", "macros"] } # For async command execution with timeouts
+async-trait = "0.1"   # For async traits

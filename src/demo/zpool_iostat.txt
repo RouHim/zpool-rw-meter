@@ -1,0 +1,7 @@
+               capacity     operations     bandwidth
+pool        alloc   free   read  write   read  write
+----------  -----  -----  -----  -----  -----  -----
+data        3.45T  2.55T     47     23   234M  12.0M
+logs            -      -      -      -      -      -
+  mirror-1     0B  1.82T      0     23      0  12.0M
+----------  -----  -----  -----  -----  -----  -----
