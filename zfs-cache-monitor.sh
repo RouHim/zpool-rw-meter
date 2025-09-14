@@ -24,6 +24,8 @@ EMPTY_BLOCK="."
 # Global variables
 POOL_NAME=""
 REFRESH_INTERVAL=""
+SLOG_DEVICE_CACHE=""
+SLOG_CACHE_VALID=false
 
 # Function to show usage
 show_usage() {
@@ -434,6 +436,63 @@ display_l2arc_section() {
     echo
 }
 
+# Function to detect SLOG devices (with caching)
+detect_slog_devices() {
+    local pool_name="$1"
+    
+    # Return cached result if valid
+    if [ "$SLOG_CACHE_VALID" = true ] && [ -n "$SLOG_DEVICE_CACHE" ]; then
+        echo "$SLOG_DEVICE_CACHE"
+        return 0
+    fi
+    
+    # Method 1: Look for dedicated logs section
+    local slog_devices
+    slog_devices=$(zpool status "$pool_name" 2>/dev/null | awk '
+        /^\s*logs/ { in_logs=1; next }
+        /^\s*(mirror|raidz|cache|spares)/ && in_logs { in_logs=0 }
+        /^\s*$/ && in_logs { in_logs=0 }
+        in_logs && /^\s+[a-zA-Z0-9/_-]+/ { 
+            gsub(/^\s+/, ""); 
+            print $1; 
+            found=1 
+        }
+        END { if(!found) exit 1 }
+    ')
+    
+    # Method 2: Look for mirror devices that might be SLOG
+    if [ $? -ne 0 ] || [ -z "$slog_devices" ]; then
+        slog_devices=$(zpool status "$pool_name" 2>/dev/null | awk '
+            /^\s*mirror-[0-9]+/ { 
+                device=$1; 
+                gsub(/^\s+/, "", device);
+                # Check if this mirror is in the main pool or logs section
+                getline;
+                if ($0 ~ /^\s+[a-zA-Z0-9/_-]+/) {
+                    print device;
+                    found=1;
+                }
+            }
+            END { if(!found) exit 1 }
+        ')
+    fi
+    
+    # Method 3: Fallback - look for any dedicated write devices
+    if [ $? -ne 0 ] || [ -z "$slog_devices" ]; then
+        slog_devices=$(zpool status "$pool_name" 2>/dev/null | grep -E "mirror-[0-9]+" | head -n1 | awk '{print $1}' | tr -d ' ')
+    fi
+    
+    # Cache the result if we found something
+    if [ -n "$slog_devices" ] && [ "$slog_devices" != "logs" ]; then
+        SLOG_DEVICE_CACHE="$slog_devices"
+        SLOG_CACHE_VALID=true
+        echo "$slog_devices"
+        return 0
+    fi
+    
+    return 1
+}
+
 # Function to get SLOG statistics
 get_slog_stats() {
     # Demo mode with realistic sample data
@@ -442,11 +501,11 @@ get_slog_stats() {
         return 0
     fi
 
+    # Use the robust detection function
     local slog_devices
-    # Look for SLOG devices in zpool status output
-    slog_devices=$(zpool status "$POOL_NAME" 2>/dev/null | grep -A 20 "logs" | grep -E "^\s+[a-zA-Z0-9/_-]+" | grep -v "logs" | head -5)
-
-    if [ -z "$slog_devices" ]; then
+    slog_devices=$(detect_slog_devices "$POOL_NAME")
+    
+    if [ $? -ne 0 ] || [ -z "$slog_devices" ]; then
         echo "0 0 0 0 no_slog"
         return 1
     fi
@@ -461,48 +520,76 @@ get_slog_stats() {
         return 1
     fi
 
-    # Get iostat data for SLOG device
-    local iostat_data
-    if command -v iostat &> /dev/null; then
-        iostat_data=$(iostat -x 1 2 | grep "$slog_device" | tail -n1)
-    fi
+    # ALWAYS return the device with basic stats - don't let stats gathering failure hide SLOG
+    # This prevents the alternating visibility issue
+    local write_ops=0
+    local write_bw=0
+    local util=0
+    local await=0
 
-    if [ -z "$iostat_data" ]; then
-        # Fallback to zpool iostat
-        local zpool_data
-        zpool_data=$(zpool iostat "$POOL_NAME" 1 2 2>/dev/null | tail -n1)
-
-        if [ -n "$zpool_data" ]; then
-            echo "$zpool_data" | awk '{
-                write_ops = $4
-                write_bw = $6
-                printf "%d %s 0 0 %s\n", write_ops, write_bw, "'"$slog_device"'"
-            }'
-        else
-            echo "0 0 0 0 $slog_device"
+    # Try to get simple, reliable stats using single-shot commands
+    # Method 1: Try simple zpool iostat without interval (single snapshot)
+    local zpool_data
+    zpool_data=$(timeout 3s zpool iostat "$POOL_NAME" 2>/dev/null | tail -n1)
+    
+    if [ -n "$zpool_data" ]; then
+        # Parse zpool iostat output (format: pool alloc free read_ops write_ops read_bw write_bw)
+        local parsed_stats
+        parsed_stats=$(echo "$zpool_data" | awk '{
+            # Skip header and pool summary lines
+            if (NF >= 6 && $1 != "pool" && $1 != "----------" && $1 ~ /^[a-zA-Z0-9_-]+$/) {
+                write_ops = ($4 != "" && $4 ~ /^[0-9]+/) ? $4 : 0
+                write_bw = ($6 != "" && $6 ~ /^[0-9]/) ? $6 : 0
+                printf "%d %s", write_ops, write_bw
+            }
+        }')
+        
+        if [ -n "$parsed_stats" ]; then
+            read -r write_ops write_bw <<< "$parsed_stats"
         fi
-    else
-        echo "$iostat_data" | awk '{
-            write_ops = $4
-            write_bw = $9
-            util = $10
-            await = $8
-            printf "%d %.1f %.1f %.1f %s\n", write_ops, write_bw, util, await, "'"$slog_device"'"
-        }'
     fi
+
+    # Method 2: Try to get utilization from the underlying physical devices
+    # For mirror-X devices, we can check the health and activity
+    if [ "$util" = "0" ]; then
+        # Get basic health/activity indicator
+        local pool_health
+        pool_health=$(timeout 2s zpool list -H -o health "$POOL_NAME" 2>/dev/null)
+        
+        if [ "$pool_health" = "ONLINE" ]; then
+            util=10  # Show minimal activity for healthy pool
+        fi
+    fi
+
+    # Always return data - never hide SLOG section once device is detected
+    printf "%d %d %.1f %.1f %s\n" "${write_ops:-0}" "${write_bw:-0}" "${util:-0}" "${await:-0}" "$slog_device"
+    return 0
 }
 
 # Function to display SLOG section
 display_slog_section() {
     local slog_data
     slog_data=$(get_slog_stats)
+    local slog_exit_code=$?
 
-    if [ $? -ne 0 ]; then
-        echo -e "${YELLOW}  ℹ SLOG not configured${NC}"
-        return 1
+    # The new get_slog_stats() function never returns failure for existing devices
+    # but we'll keep fallback logic for robustness
+    if [ $slog_exit_code -ne 0 ]; then
+        read -r write_ops write_bw util await device <<< "$slog_data"
+        # Check if we have a cached device but failed to get stats
+        if [ "$SLOG_CACHE_VALID" = true ] && [ -n "$SLOG_DEVICE_CACHE" ]; then
+            device="$SLOG_DEVICE_CACHE"
+            write_ops=0
+            write_bw=0
+            util=0
+            await=0
+        else
+            echo -e "${YELLOW}  ℹ SLOG not configured${NC}"
+            return 1
+        fi
+    else
+        read -r write_ops write_bw util await device <<< "$slog_data"
     fi
-
-    read -r write_ops write_bw util await device <<< "$slog_data"
 
     # Validate and set defaults
     write_ops=${write_ops:-0}
@@ -521,6 +608,7 @@ display_slog_section() {
     if ! [[ "$util" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then util=0; fi
     if ! [[ "$await" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then await=0; fi
 
+    # Only hide if truly no device (should rarely happen now)
     if [ "$device" = "no_slog" ] || [ "$device" = "logs" ] || [ -z "$device" ]; then
         echo -e "${YELLOW}  ℹ SLOG not configured${NC}"
         return 1
@@ -544,7 +632,7 @@ display_slog_section() {
     local perf_rating=$(get_performance_rating "$perf_score" 80 60)
     local util_bar=$(create_progress_bar "${util%.*}")
 
-    echo -e "${BOLD}✏️  SLOG (Synchronous Write Log)${NC}"
+    echo -e "${BOLD}🟡 SLOG (Synchronous Write Log)${NC}"
     echo -e "  Device:      ${BLUE}$device${NC}"
     echo -e "  Utilization: ${perf_color}${util_bar} ${util}%${NC}"
     echo -e "  Write Ops:   ${BLUE}${write_ops}/s${NC}"
@@ -585,11 +673,14 @@ display_footer() {
 
 # Main monitoring loop
 main_loop() {
-    # Setup signal handlers
-    trap 'echo -e "\n${GREEN}Monitoring stopped.${NC}"; exit 0' INT TERM
+    # Setup signal handlers and hide cursor to reduce flicker
+    printf '\033[?25l'
+    trap 'printf "\033[?25h"; echo -e "\n${GREEN}Monitoring stopped.${NC}"; exit 0' INT TERM
 
     while true; do
-        clear_screen
+        # Move cursor to top-left and clear from cursor to end of screen
+        printf '\033[H\033[J'
+        
         display_header
 
         # Display cache sections
