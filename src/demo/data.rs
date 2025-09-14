@@ -62,7 +62,7 @@ logs            -      -      -      -      -      -
 "#;
 
 /// Demo /proc/spl/kstat/zfs/arcstats content
-pub const DEMO_ARCSTATS: &str = r#"7 1 0x01 91 6144 31927403520 18446744073709551615
+pub const DEMO_ARCSTATS: &str = r#"7 1 1 91 6144 31927403520 18446744073709551615
 name                            type data
 hits                            4    18446744073709551615
 misses                          4    0

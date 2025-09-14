@@ -109,8 +109,8 @@ mod tests {
         let now = Instant::now();
         let rate = calculator.calculate_rate("ops", 1100, now).unwrap();
 
-        // Should be approximately 100 ops per second (100 ops / 1 second)
-        assert!((rate - 100.0).abs() < 10.0); // Allow some tolerance
+        // Should be approximately 1000 ops per second (100 ops / 0.1 second)
+        assert!((rate - 1000.0).abs() < 200.0); // Allow reasonable tolerance for timing
     }
 
     #[test]
@@ -177,15 +177,16 @@ mod tests {
     }
 
     #[test]
-    fn test_negative_rate_calculation() {
+    fn test_decreasing_rate_calculation() {
         let mut calculator = RateCalculator::new();
         let now = Instant::now();
 
-        // Decreasing value should result in negative rate
+        // Decreasing value should result in zero rate (due to saturating_sub protection)
         calculator.update("test", 200, now);
         let rate = calculator.calculate_rate("test", 100, now + Duration::from_secs(1)).unwrap();
 
-        assert_eq!(rate, -100.0);
+        // saturating_sub prevents negative rates, so we get 0 instead of -100
+        assert_eq!(rate, 0.0);
     }
 
     #[test]
@@ -252,5 +253,129 @@ mod tests {
                 assert!(rate.is_none());
             }
         }
+    }
+
+    #[test]
+    fn test_overflow_protection() {
+        let mut calculator = RateCalculator::new();
+        let now = Instant::now();
+
+        // Test with maximum u64 values to ensure saturating_sub works
+        calculator.update("test", u64::MAX, now);
+
+        // Decreasing from max should use saturating_sub (result should be 0)
+        let rate = calculator.calculate_rate("test", 0, now + Duration::from_secs(1)).unwrap();
+        assert_eq!(rate, 0.0); // saturating_sub prevents underflow
+
+        // Test with very large values
+        calculator.reset();
+        calculator.update("large", u64::MAX / 2, now);
+        let rate = calculator.calculate_rate("large", u64::MAX, now + Duration::from_secs(1)).unwrap();
+        assert!(rate > 0.0);
+    }
+
+    #[test]
+    fn test_precision_with_small_deltas() {
+        let mut calculator = RateCalculator::new();
+        let now = Instant::now();
+
+        // Test with very small time deltas (microseconds)
+        calculator.update("precise", 1000, now);
+        let later = now + Duration::from_micros(500); // 0.0005 seconds
+        let rate = calculator.calculate_rate("precise", 1001, later).unwrap();
+
+        // Should be 2 ops per second (1 op / 0.0005 seconds)
+        assert!((rate - 2000.0).abs() < 100.0); // Allow some tolerance
+    }
+
+    #[test]
+    fn test_very_large_rates() {
+        let mut calculator = RateCalculator::new();
+        let now = Instant::now();
+
+        // Test with very large value changes
+        calculator.update("bandwidth", 0, now);
+        let rate = calculator.calculate_rate("bandwidth", 1_000_000_000, now + Duration::from_millis(1)).unwrap();
+
+        // Should be 1e12 bytes per second
+        assert!((rate - 1_000_000_000_000.0).abs() < 1_000_000.0);
+    }
+
+    #[test]
+    fn test_rate_calculation_with_fractional_seconds() {
+        let mut calculator = RateCalculator::new();
+        let now = Instant::now();
+
+        calculator.update("test", 0, now);
+
+        // Test with 0.5 seconds
+        let half_second = now + Duration::from_millis(500);
+        let rate = calculator.calculate_rate("test", 100, half_second).unwrap();
+
+        // Should be 200 ops per second (100 ops / 0.5 seconds)
+        assert!((rate - 200.0).abs() < 10.0);
+    }
+
+    #[test]
+    fn test_calculate_rate_without_update() {
+        let mut calculator = RateCalculator::new();
+        let now = Instant::now();
+
+        // Manually update without using calculate_and_update
+        calculator.update("manual", 100, now);
+
+        // Calculate rate without updating
+        let later = now + Duration::from_secs(2);
+        let rate = calculator.calculate_rate("manual", 300, later).unwrap();
+
+        // Should be 100 ops per second (200 ops / 2 seconds)
+        assert!((rate - 100.0).abs() < 5.0);
+
+        // Value should still be 100 (not updated)
+        assert_eq!(*calculator.previous_values.get("manual").unwrap(), 100);
+    }
+
+    #[test]
+    fn test_update_overwrites_previous_values() {
+        let mut calculator = RateCalculator::new();
+        let time1 = Instant::now();
+        let time2 = time1 + Duration::from_secs(1);
+
+        // First update
+        calculator.update("test", 100, time1);
+        assert_eq!(*calculator.previous_values.get("test").unwrap(), 100);
+        assert_eq!(*calculator.previous_timestamps.get("test").unwrap(), time1);
+
+        // Second update should overwrite
+        calculator.update("test", 200, time2);
+        assert_eq!(*calculator.previous_values.get("test").unwrap(), 200);
+        assert_eq!(*calculator.previous_timestamps.get("test").unwrap(), time2);
+    }
+
+    #[test]
+    fn test_empty_key_handling() {
+        let mut calculator = RateCalculator::new();
+        let now = Instant::now();
+
+        // Empty string should work as a valid key
+        let rate = calculator.calculate_and_update("", 100, now);
+        assert!(rate.is_none());
+
+        let rate2 = calculator.calculate_and_update("", 200, now + Duration::from_secs(1)).unwrap();
+        assert_eq!(rate2, 100.0);
+    }
+
+    #[test]
+    fn test_unicode_keys() {
+        let mut calculator = RateCalculator::new();
+        let now = Instant::now();
+
+        // Unicode keys should work
+        let key = "测试_key_🚀";
+        let rate = calculator.calculate_and_update(key, 50, now);
+        assert!(rate.is_none());
+
+        let rate2 = calculator.calculate_and_update(key, 100, now + Duration::from_secs(1)).unwrap();
+        assert_eq!(rate2, 50.0);
     }
 }

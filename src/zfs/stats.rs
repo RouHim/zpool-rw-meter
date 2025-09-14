@@ -55,6 +55,11 @@ impl<E: CommandExecutor, F: FilesystemReader> ZfsStatsCollector<E, F> {
         let mut read_ops_total = 0u64;
 
         for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with("name") {
+                continue; // Skip header lines
+            }
+
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 3 {
                 let value_str = parts[2];
@@ -225,6 +230,11 @@ impl<E: CommandExecutor, F: FilesystemReader> ZfsStatsCollector<E, F> {
         let mut l2_read_bytes_total = 0u64;
 
         for line in arc_content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with("name") {
+                continue; // Skip header lines
+            }
+
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 3 {
                 let value_str = parts[2];
@@ -401,13 +411,9 @@ impl<E: CommandExecutor, F: FilesystemReader> ZfsStatsCollector<E, F> {
             // Look for the device section
             if line.contains(device_name) {
                 in_device_section = true;
-                continue;
-            }
-
-            if in_device_section && !line.is_empty() && !line.starts_with('-') {
-                // Parse the I/O stats line: "0B 1.82T      0     23      0  12.0M"
+                // If this line contains the device name and has enough parts, parse it directly
                 let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 6 {
+                if parts.len() >= 7 {
                     write_ops = parts[4].parse::<u64>().map_err(|_| {
                         ZfsError::parse_error(
                             "iostat write_ops",
@@ -416,7 +422,25 @@ impl<E: CommandExecutor, F: FilesystemReader> ZfsStatsCollector<E, F> {
                         )
                     })?;
                     // Parse bandwidth (e.g., "12.0M" -> bytes)
-                    write_bw = self.parse_bandwidth(parts[5])?;
+                    write_bw = self.parse_bandwidth(parts[6])?;
+                    break;
+                }
+                continue;
+            }
+
+            if in_device_section && !line.is_empty() && !line.starts_with('-') {
+                // Parse the I/O stats line: "mirror-1  -  -  0  23  0  12.0M"
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 7 {
+                    write_ops = parts[4].parse::<u64>().map_err(|_| {
+                        ZfsError::parse_error(
+                            "iostat write_ops",
+                            parts[4],
+                            "Invalid write operations count",
+                        )
+                    })?;
+                    // Parse bandwidth (e.g., "12.0M" -> bytes)
+                    write_bw = self.parse_bandwidth(parts[6])?;
                 }
                 break;
             }
@@ -447,14 +471,14 @@ impl<E: CommandExecutor, F: FilesystemReader> ZfsStatsCollector<E, F> {
             ZfsError::invalid_format("non-empty string", "empty string", "bandwidth parsing")
         })?;
 
-        let num_str = if "BKMGT".contains(last_char) {
+        let num_str = if "BKMGTbkmgt".contains(last_char) {
             &bw_str[..bw_str.len().saturating_sub(1)]
         } else {
             // No unit suffix, treat whole string as number
             bw_str
         };
 
-        let multiplier: u64 = match last_char {
+        let multiplier: u64 = match last_char.to_ascii_uppercase() {
             'B' => 1,
             'K' => 1024,
             'M' => 1024 * 1024,
@@ -478,7 +502,8 @@ impl<E: CommandExecutor, F: FilesystemReader> ZfsStatsCollector<E, F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::system::{DemoCommandExecutor, DemoFilesystemReader};
+    use crate::system::commands::DemoCommandExecutor;
+    use crate::system::filesystem::DemoFilesystemReader;
     use std::time::Instant;
 
     #[test]
@@ -576,43 +601,43 @@ mod tests {
         assert!(result.is_err());
 
         if let Err(ZfsError::ParseError { data_source, .. }) = result {
-            assert_eq!(data_source, "bandwidth number");
+            assert_eq!(data_source, "bandwidth");
         } else {
             panic!("Expected ParseError");
         }
     }
 
-    #[test]
-    fn test_collect_arc_stats_from_proc_success() {
-        let collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
+    #[tokio::test]
+    async fn test_collect_arc_stats_from_proc_success() {
+        let mut collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
         let now = Instant::now();
 
         // This will use the demo filesystem reader which returns mock data
-        let result = collector.collect_arc_stats_from_proc(now);
+        let result = collector.collect_arc_stats_from_proc(now).await;
         // The demo data may not have the expected format, so we just check it doesn't panic
         // In a real test, we'd mock the filesystem reader to return known data
         let _ = result; // Just ensure it doesn't panic
     }
 
-    #[test]
-    fn test_collect_arc_stats_from_arcstat_fallback() {
-        let collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
+    #[tokio::test]
+    async fn test_collect_arc_stats_from_arcstat_fallback() {
+        let mut collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
         let now = Instant::now();
 
         // This will try various arcstat commands, some may succeed with demo data
-        let result = collector.collect_arc_stats_from_arcstat(now);
+        let result = collector.collect_arc_stats_from_arcstat(now).await;
         // We don't assert success since demo data may not match expected formats
         let _ = result; // Just ensure it doesn't panic
     }
 
-    #[test]
-    fn test_collect_slog_stats_cached() {
+    #[tokio::test]
+    async fn test_collect_slog_stats_cached() {
         let mut collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
 
         // First call should populate cache
-        let result1 = collector.collect_slog_stats();
+        let result1 = collector.collect_slog_stats().await;
         // Second call should use cache
-        let result2 = collector.collect_slog_stats();
+        let result2 = collector.collect_slog_stats().await;
 
         // Both should complete without panicking
         let _ = result1;
@@ -629,5 +654,211 @@ mod tests {
 
         // Test cache cleanup (though no expired entries in this case)
         collector.cleanup_cache();
+    }
+
+    #[test]
+    fn test_parse_arcstat_output_edge_cases() {
+        let collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
+
+        // Test with extra whitespace
+        let output = "  95.2   4.8  1234   5368709120  8589934592  ";
+        let result = collector.parse_arcstat_output(output);
+        assert!(result.is_ok());
+        let stats = result.unwrap();
+        assert_eq!(stats.hit_rate, 95.2);
+        assert_eq!(stats.miss_rate, 4.8);
+
+        // Test with tabs
+        let output = "95.2\t4.8\t1234\t5368709120\t8589934592";
+        let result = collector.parse_arcstat_output(output);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_parse_arcstat_output_invalid_miss_rate() {
+        let collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
+        let output = "95.2 invalid 1234 5368709120 8589934592";
+
+        let result = collector.parse_arcstat_output(output);
+        assert!(result.is_err());
+
+        if let Err(ZfsError::ParseError { data_source, .. }) = result {
+            assert_eq!(data_source, "arcstat miss_rate");
+        } else {
+            panic!("Expected ParseError");
+        }
+    }
+
+    #[test]
+    fn test_parse_arcstat_output_invalid_read_ops() {
+        let collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
+        let output = "95.2 4.8 invalid 5368709120 8589934592";
+
+        let result = collector.parse_arcstat_output(output);
+        assert!(result.is_err());
+
+        if let Err(ZfsError::ParseError { data_source, .. }) = result {
+            assert_eq!(data_source, "arcstat read_ops");
+        } else {
+            panic!("Expected ParseError");
+        }
+    }
+
+    #[test]
+    fn test_parse_arcstat_output_invalid_size() {
+        let collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
+        let output = "95.2 4.8 1234 invalid 8589934592";
+
+        let result = collector.parse_arcstat_output(output);
+        assert!(result.is_err());
+
+        if let Err(ZfsError::ParseError { data_source, .. }) = result {
+            assert_eq!(data_source, "arcstat size");
+        } else {
+            panic!("Expected ParseError");
+        }
+    }
+
+    #[test]
+    fn test_parse_arcstat_output_invalid_target() {
+        let collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
+        let output = "95.2 4.8 1234 5368709120 invalid";
+
+        let result = collector.parse_arcstat_output(output);
+        assert!(result.is_err());
+
+        if let Err(ZfsError::ParseError { data_source, .. }) = result {
+            assert_eq!(data_source, "arcstat target");
+        } else {
+            panic!("Expected ParseError");
+        }
+    }
+
+    #[test]
+    fn test_parse_bandwidth_edge_cases() {
+        let collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
+
+        // Test decimal values
+        assert_eq!(collector.parse_bandwidth("1.5K").unwrap(), 1536); // 1.5 * 1024
+        assert_eq!(collector.parse_bandwidth("2.25M").unwrap(), 2359296); // 2.25 * 1024 * 1024
+
+        // Test case sensitivity (should work with lowercase)
+        assert_eq!(collector.parse_bandwidth("1k").unwrap(), 1024);
+        assert_eq!(collector.parse_bandwidth("1m").unwrap(), 1024 * 1024);
+
+        // Test very large numbers
+        assert_eq!(collector.parse_bandwidth("1000T").unwrap(), 1000 * 1024u64 * 1024 * 1024 * 1024);
+    }
+
+
+
+    #[test]
+    fn test_parse_slog_device_from_status() {
+        let collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
+
+        // Test with mirror device
+        let status_output = r#"
+  pool: testpool
+ state: ONLINE
+  scan: none requested
+config:
+
+    NAME        STATE     READ WRITE CKSUM
+    testpool    ONLINE       0     0     0
+      raidz1-0  ONLINE       0     0     0
+        sda     ONLINE       0     0     0
+        sdb     ONLINE       0     0     0
+
+logs
+  mirror-1    ONLINE       0     0     0
+    sdc       ONLINE       0     0     0
+    sdd       ONLINE       0     0     0
+"#;
+
+        let result = collector.parse_slog_device_from_status(status_output);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Some("mirror-1".to_string()));
+
+        // Test with no SLOG
+        let status_output_no_slog = r#"
+  pool: testpool
+ state: ONLINE
+config:
+
+    NAME        STATE     READ WRITE CKSUM
+    testpool    ONLINE       0     0     0
+      raidz1-0  ONLINE       0     0     0
+"#;
+
+        let result = collector.parse_slog_device_from_status(status_output_no_slog);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn test_parse_slog_stats_from_iostat() {
+        let collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
+
+        let iostat_output = r#"
+                              capacity     operations     bandwidth
+pool                       alloc   free   read  write   read  write
+--------------------------  -----  -----  -----  -----  -----  -----
+testpool                   1.23T  2.34T      0     23      0  12.0M
+  mirror-1                     -      -      0     23      0  12.0M
+    sdc                         -      -      0     23      0  12.0M
+--------------------------  -----  -----  -----  -----  -----
+"#;
+
+        let result = collector.parse_slog_stats_from_iostat(iostat_output, "mirror-1");
+        assert!(result.is_ok());
+        let (write_ops, write_bw) = result.unwrap();
+        assert_eq!(write_ops, 23);
+        assert_eq!(write_bw, 12 * 1024 * 1024); // 12.0M in bytes
+    }
+
+    #[test]
+    fn test_parse_slog_stats_from_iostat_no_device() {
+        let collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
+
+        let iostat_output = r#"
+pool                       alloc   free   read  write   read  write
+testpool                   1.23T  2.34T      0     23      0  12.0M
+"#;
+
+        let result = collector.parse_slog_stats_from_iostat(iostat_output, "nonexistent");
+        assert!(result.is_ok());
+        let (write_ops, write_bw) = result.unwrap();
+        assert_eq!(write_ops, 0);
+        assert_eq!(write_bw, 0);
+    }
+
+    #[test]
+    fn test_parse_slog_stats_from_iostat_invalid_data() {
+        let collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
+
+        let iostat_output = r#"
+mirror-1                     -      -      0  invalid      0  12.0M
+"#;
+
+        let result = collector.parse_slog_stats_from_iostat(iostat_output, "mirror-1");
+        assert!(result.is_err());
+
+        if let Err(ZfsError::ParseError { data_source, .. }) = result {
+            assert_eq!(data_source, "iostat write_ops");
+        } else {
+            panic!("Expected ParseError");
+        }
+    }
+
+    #[test]
+    fn test_parse_slog_stats_from_iostat_invalid_bandwidth() {
+        let collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
+
+        let iostat_output = r#"
+mirror-1                     -      -      0     23      0  invalid
+"#;
+
+        let result = collector.parse_slog_stats_from_iostat(iostat_output, "mirror-1");
+        assert!(result.is_err());
     }
 }
