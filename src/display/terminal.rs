@@ -19,11 +19,7 @@ impl Terminal {
         io::stdout().flush()
     }
 
-    /// Move cursor to position (1,1) - top left
-    pub fn move_cursor_home(&self) -> io::Result<()> {
-        print!("\x1B[1;1H");
-        io::stdout().flush()
-    }
+
 
     /// Hide cursor during updates to prevent flicker
     pub fn hide_cursor(&self) -> io::Result<()> {
@@ -54,18 +50,7 @@ impl Terminal {
         style
     }
 
-    /// Get performance rating text
-    pub fn get_performance_rating(&self, percentage: f64) -> &'static str {
-        if percentage >= 85.0 {
-            "Excellent"
-        } else if percentage >= 70.0 {
-            "Good"
-        } else if percentage >= 50.0 {
-            "Fair"
-        } else {
-            "Poor"
-        }
-    }
+
 }
 
 impl Default for Terminal {

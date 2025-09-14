@@ -20,7 +20,6 @@ pub enum ZfsError {
     /// Parsing failed for a specific data source
     ParseError {
         data_source: String,
-        data: String,
         reason: String,
     },
 
@@ -33,22 +32,6 @@ pub enum ZfsError {
 
     /// Required ZFS subsystem not available
     SubsystemUnavailable { subsystem: String, reason: String },
-
-    /// Cache operation failed
-    CacheError {
-        operation: String,
-        key: String,
-        source: Box<dyn std::error::Error + Send + Sync>,
-    },
-
-    /// Rate calculation failed
-    RateCalculationError { metric: String, reason: String },
-
-    /// Timeout occurred during operation
-    TimeoutError {
-        operation: String,
-        timeout: std::time::Duration,
-    },
 }
 
 impl fmt::Display for ZfsError {
@@ -65,7 +48,6 @@ impl fmt::Display for ZfsError {
             ZfsError::ParseError {
                 data_source,
                 reason,
-                ..
             } => {
                 write!(f, "Failed to parse {}: {}", data_source, reason)
             }
@@ -83,15 +65,6 @@ impl fmt::Display for ZfsError {
             ZfsError::SubsystemUnavailable { subsystem, reason } => {
                 write!(f, "{} subsystem unavailable: {}", subsystem, reason)
             }
-            ZfsError::CacheError { operation, key, .. } => {
-                write!(f, "Cache {} failed for key '{}'", operation, key)
-            }
-            ZfsError::RateCalculationError { metric, reason } => {
-                write!(f, "Rate calculation failed for {}: {}", metric, reason)
-            }
-            ZfsError::TimeoutError { operation, timeout } => {
-                write!(f, "{} timed out after {:?}", operation, timeout)
-            }
         }
     }
 }
@@ -101,7 +74,6 @@ impl std::error::Error for ZfsError {
         match self {
             ZfsError::CommandError { source, .. } => Some(source.as_ref()),
             ZfsError::FilesystemError { source, .. } => Some(source.as_ref()),
-            ZfsError::CacheError { source, .. } => Some(source.as_ref()),
             _ => None,
         }
     }
@@ -133,10 +105,9 @@ impl ZfsError {
     }
 
     /// Create a parse error
-    pub fn parse_error(data_source: &str, data: &str, reason: &str) -> Self {
+    pub fn parse_error(data_source: &str, reason: &str) -> Self {
         ZfsError::ParseError {
             data_source: data_source.to_string(),
-            data: data.to_string(),
             reason: reason.to_string(),
         }
     }
@@ -158,33 +129,7 @@ impl ZfsError {
         }
     }
 
-    /// Create a cache error
-    pub fn cache_error(operation: &str, key: &str, message: &str) -> Self {
-        ZfsError::CacheError {
-            operation: operation.to_string(),
-            key: key.to_string(),
-            source: Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                message.to_string(),
-            )),
-        }
-    }
 
-    /// Create a rate calculation error
-    pub fn rate_calculation_error(metric: &str, reason: &str) -> Self {
-        ZfsError::RateCalculationError {
-            metric: metric.to_string(),
-            reason: reason.to_string(),
-        }
-    }
-
-    /// Create a timeout error
-    pub fn timeout_error(operation: &str, timeout: std::time::Duration) -> Self {
-        ZfsError::TimeoutError {
-            operation: operation.to_string(),
-            timeout,
-        }
-    }
 }
 
 /// Result type alias for ZFS operations

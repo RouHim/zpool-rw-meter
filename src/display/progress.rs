@@ -41,37 +41,7 @@ impl ProgressBar {
         }
     }
 
-    /// Render progress bar with custom filled/empty characters
-    pub fn render_with_chars(
-        &self,
-        percentage: f64,
-        filled_char: char,
-        empty_char: char,
-        label: Option<&str>,
-    ) -> String {
-        let filled = (percentage / 100.0 * self.width as f64).round() as usize;
-        let empty = self.width.saturating_sub(filled);
 
-        let filled_chars = filled_char.to_string().repeat(filled);
-        let empty_chars = empty_char.to_string().repeat(empty);
-
-        let bar = format!("[{}{}]", filled_chars, empty_chars);
-        let percent_text = format!("{:.1}%", percentage);
-
-        let styled_bar = if self.terminal.supports_color {
-            self.terminal
-                .get_performance_style(percentage)
-                .apply_to(&bar)
-                .to_string()
-        } else {
-            bar
-        };
-
-        match label {
-            Some(label) => format!("{} {} {}", label, styled_bar, percent_text),
-            None => format!("{} {}", styled_bar, percent_text),
-        }
-    }
 }
 
 impl Default for ProgressBar {

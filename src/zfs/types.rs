@@ -2,7 +2,6 @@
 #[derive(Debug, Clone)]
 pub struct ArcStats {
     pub hit_rate: f64,
-    pub miss_rate: f64,
     pub size: u64,     // Current cache size in bytes
     pub target: u64,   // Target cache size in bytes
     pub read_ops: u64, // Read operations per second
@@ -12,7 +11,6 @@ pub struct ArcStats {
 #[derive(Debug, Clone)]
 pub struct L2ArcStats {
     pub hit_rate: f64,
-    pub miss_rate: f64,
     pub size: u64,       // Cache size in bytes
     pub read_bytes: u64, // Bytes read per second
     pub total_ops: u64,  // Total operations per second

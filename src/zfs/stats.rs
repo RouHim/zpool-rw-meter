@@ -66,7 +66,6 @@ impl<E: CommandExecutor, F: FilesystemReader> ZfsStatsCollector<E, F> {
                 let value = value_str.parse::<u64>().map_err(|_| {
                     ZfsError::parse_error(
                         "ARC kstat",
-                        line,
                         &format!("Invalid number: {}", value_str),
                     )
                 })?;
@@ -89,11 +88,6 @@ impl<E: CommandExecutor, F: FilesystemReader> ZfsStatsCollector<E, F> {
         } else {
             0.0
         };
-        let miss_rate = if total > 0 {
-            (misses as f64 / total as f64) * 100.0
-        } else {
-            0.0
-        };
 
         // Calculate read operations per second
         let read_ops_rate = self
@@ -103,7 +97,6 @@ impl<E: CommandExecutor, F: FilesystemReader> ZfsStatsCollector<E, F> {
 
         Ok(ArcStats {
             hit_rate,
-            miss_rate,
             size,
             target: c_max,
             read_ops: read_ops_rate as u64,
@@ -159,45 +152,35 @@ impl<E: CommandExecutor, F: FilesystemReader> ZfsStatsCollector<E, F> {
     fn parse_arcstat_output(&self, output: &str) -> ZfsResult<ArcStats> {
         // Parse the output format: "100.0 0.0 1247 49720066048 49910562816"
         let parts: Vec<&str> = output.split_whitespace().collect();
-        if parts.len() < 5 {
+        if parts.len() < 4 {
             return Err(ZfsError::invalid_format(
-                "at least 5 space-separated numbers",
+                "at least 4 space-separated numbers",
                 &format!("{} parts", parts.len()),
                 "arcstat output",
             ));
         }
 
         let hit_rate = parts[0].parse::<f64>().map_err(|_| {
-            ZfsError::parse_error("arcstat hit_rate", parts[0], "Invalid hit rate percentage")
+            ZfsError::parse_error("arcstat hit_rate", "Invalid hit rate percentage")
         })?;
 
-        let miss_rate = parts[1].parse::<f64>().map_err(|_| {
-            ZfsError::parse_error(
-                "arcstat miss_rate",
-                parts[1],
-                "Invalid miss rate percentage",
-            )
-        })?;
-
-        let read_ops = parts[2].parse::<u64>().map_err(|_| {
+        let read_ops = parts[1].parse::<u64>().map_err(|_| {
             ZfsError::parse_error(
                 "arcstat read_ops",
-                parts[2],
                 "Invalid read operations count",
             )
         })?;
 
-        let size = parts[3]
+        let size = parts[2]
             .parse::<u64>()
-            .map_err(|_| ZfsError::parse_error("arcstat size", parts[3], "Invalid cache size"))?;
+            .map_err(|_| ZfsError::parse_error("arcstat size", "Invalid cache size"))?;
 
-        let target = parts[4].parse::<u64>().map_err(|_| {
-            ZfsError::parse_error("arcstat target", parts[4], "Invalid target size")
+        let target = parts[3].parse::<u64>().map_err(|_| {
+            ZfsError::parse_error("arcstat target", "Invalid target size")
         })?;
 
         Ok(ArcStats {
             hit_rate,
-            miss_rate,
             size,
             target,
             read_ops,
@@ -241,7 +224,6 @@ impl<E: CommandExecutor, F: FilesystemReader> ZfsStatsCollector<E, F> {
                 let value = value_str.parse::<u64>().map_err(|_| {
                     ZfsError::parse_error(
                         "L2ARC kstat",
-                        line,
                         &format!("Invalid number: {}", value_str),
                     )
                 })?;
@@ -262,11 +244,6 @@ impl<E: CommandExecutor, F: FilesystemReader> ZfsStatsCollector<E, F> {
         } else {
             0.0
         };
-        let l2_miss_rate = if total_l2_ops > 0 {
-            (l2_misses as f64 / total_l2_ops as f64) * 100.0
-        } else {
-            0.0
-        };
 
         // Calculate rates for operations and read bandwidth
         let l2_ops_rate = self
@@ -280,7 +257,6 @@ impl<E: CommandExecutor, F: FilesystemReader> ZfsStatsCollector<E, F> {
 
         Ok(Some(L2ArcStats {
             hit_rate: l2_hit_rate,
-            miss_rate: l2_miss_rate,
             size: l2_size,
             read_bytes: l2_read_bytes_rate as u64,
             total_ops: l2_ops_rate as u64,
@@ -417,7 +393,6 @@ impl<E: CommandExecutor, F: FilesystemReader> ZfsStatsCollector<E, F> {
                     write_ops = parts[4].parse::<u64>().map_err(|_| {
                         ZfsError::parse_error(
                             "iostat write_ops",
-                            parts[4],
                             "Invalid write operations count",
                         )
                     })?;
@@ -435,7 +410,6 @@ impl<E: CommandExecutor, F: FilesystemReader> ZfsStatsCollector<E, F> {
                     write_ops = parts[4].parse::<u64>().map_err(|_| {
                         ZfsError::parse_error(
                             "iostat write_ops",
-                            parts[4],
                             "Invalid write operations count",
                         )
                     })?;
@@ -449,15 +423,7 @@ impl<E: CommandExecutor, F: FilesystemReader> ZfsStatsCollector<E, F> {
         Ok((write_ops, write_bw))
     }
 
-    /// Clear all cached data (useful for testing or when pool configuration changes)
-    pub fn clear_cache(&mut self) {
-        self.cache.clear();
-    }
 
-    /// Cleanup expired cache entries
-    pub fn cleanup_cache(&mut self) {
-        self.cache.cleanup();
-    }
 
     /// Parse bandwidth string (e.g., "12.0M" -> bytes)
     fn parse_bandwidth(&self, bw_str: &str) -> ZfsResult<u64> {
@@ -487,13 +453,13 @@ impl<E: CommandExecutor, F: FilesystemReader> ZfsStatsCollector<E, F> {
             _ => {
                 // If no unit, assume bytes - parse the whole string
                 return bw_str.parse::<u64>().map_err(|_| {
-                    ZfsError::parse_error("bandwidth", bw_str, "Invalid number format")
+                    ZfsError::parse_error("bandwidth", "Invalid number format")
                 });
             }
         };
 
         let num: f64 = num_str.parse().map_err(|_| {
-            ZfsError::parse_error("bandwidth number", num_str, "Invalid numeric value")
+            ZfsError::parse_error("bandwidth number", "Invalid numeric value")
         })?;
         Ok((num * multiplier as f64) as u64)
     }
@@ -509,14 +475,13 @@ mod tests {
     #[test]
     fn test_parse_arcstat_output_valid() {
         let collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
-        let output = "95.2 4.8 1234 5368709120 8589934592";
+        let output = "95.2 1234 5368709120 8589934592";
 
         let result = collector.parse_arcstat_output(output);
         assert!(result.is_ok());
 
         let stats = result.unwrap();
         assert_eq!(stats.hit_rate, 95.2);
-        assert_eq!(stats.miss_rate, 4.8);
         assert_eq!(stats.read_ops, 1234);
         assert_eq!(stats.size, 5368709120);
         assert_eq!(stats.target, 8589934592);
@@ -525,7 +490,7 @@ mod tests {
     #[test]
     fn test_parse_arcstat_output_insufficient_parts() {
         let collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
-        let output = "95.2 4.8 1234"; // Only 3 parts, need 5
+        let output = "95.2 1234"; // Only 2 parts, need 4
 
         let result = collector.parse_arcstat_output(output);
         assert!(result.is_err());
@@ -534,8 +499,8 @@ mod tests {
             expected, received, ..
         }) = result
         {
-            assert_eq!(expected, "at least 5 space-separated numbers");
-            assert_eq!(received, "3 parts");
+            assert_eq!(expected, "at least 4 space-separated numbers");
+            assert_eq!(received, "2 parts");
         } else {
             panic!("Expected InvalidFormat error");
         }
@@ -653,55 +618,29 @@ mod tests {
         let _ = result2;
     }
 
-    #[test]
-    fn test_cache_operations() {
-        let mut collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
 
-        // Test cache clearing
-        collector.clear_cache();
-        assert!(collector.cache.is_empty());
-
-        // Test cache cleanup (though no expired entries in this case)
-        collector.cleanup_cache();
-    }
 
     #[test]
     fn test_parse_arcstat_output_edge_cases() {
         let collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
 
         // Test with extra whitespace
-        let output = "  95.2   4.8  1234   5368709120  8589934592  ";
+        let output = "  95.2   1234   5368709120  8589934592  ";
         let result = collector.parse_arcstat_output(output);
         assert!(result.is_ok());
         let stats = result.unwrap();
         assert_eq!(stats.hit_rate, 95.2);
-        assert_eq!(stats.miss_rate, 4.8);
 
         // Test with tabs
-        let output = "95.2\t4.8\t1234\t5368709120\t8589934592";
+        let output = "95.2\t1234\t5368709120\t8589934592";
         let result = collector.parse_arcstat_output(output);
         assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_parse_arcstat_output_invalid_miss_rate() {
-        let collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
-        let output = "95.2 invalid 1234 5368709120 8589934592";
-
-        let result = collector.parse_arcstat_output(output);
-        assert!(result.is_err());
-
-        if let Err(ZfsError::ParseError { data_source, .. }) = result {
-            assert_eq!(data_source, "arcstat miss_rate");
-        } else {
-            panic!("Expected ParseError");
-        }
     }
 
     #[test]
     fn test_parse_arcstat_output_invalid_read_ops() {
         let collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
-        let output = "95.2 4.8 invalid 5368709120 8589934592";
+        let output = "95.2 invalid 5368709120 8589934592";
 
         let result = collector.parse_arcstat_output(output);
         assert!(result.is_err());
@@ -716,7 +655,22 @@ mod tests {
     #[test]
     fn test_parse_arcstat_output_invalid_size() {
         let collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
-        let output = "95.2 4.8 1234 invalid 8589934592";
+        let output = "95.2 invalid 5368709120 8589934592";
+
+        let result = collector.parse_arcstat_output(output);
+        assert!(result.is_err());
+
+        if let Err(ZfsError::ParseError { data_source, .. }) = result {
+            assert_eq!(data_source, "arcstat read_ops");
+        } else {
+            panic!("Expected ParseError");
+        }
+    }
+
+    #[test]
+    fn test_parse_arcstat_output_invalid_target() {
+        let collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
+        let output = "95.2 1234 invalid 8589934592";
 
         let result = collector.parse_arcstat_output(output);
         assert!(result.is_err());
@@ -728,20 +682,7 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_parse_arcstat_output_invalid_target() {
-        let collector = ZfsStatsCollector::new(DemoCommandExecutor, DemoFilesystemReader);
-        let output = "95.2 4.8 1234 5368709120 invalid";
 
-        let result = collector.parse_arcstat_output(output);
-        assert!(result.is_err());
-
-        if let Err(ZfsError::ParseError { data_source, .. }) = result {
-            assert_eq!(data_source, "arcstat target");
-        } else {
-            panic!("Expected ParseError");
-        }
-    }
 
     #[test]
     fn test_parse_bandwidth_edge_cases() {

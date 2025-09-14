@@ -63,16 +63,7 @@ impl RateCalculator {
         rate
     }
 
-    /// Reset all stored values (useful for testing or reinitialization)
-    pub fn reset(&mut self) {
-        self.previous_values.clear();
-        self.previous_timestamps.clear();
-    }
 
-    /// Check if we have previous data for a key
-    pub fn has_previous_data(&self, key: &str) -> bool {
-        self.previous_values.contains_key(key) && self.previous_timestamps.contains_key(key)
-    }
 }
 
 impl Default for RateCalculator {
@@ -193,94 +184,11 @@ mod tests {
         assert_eq!(rate, 0.0);
     }
 
-    #[test]
-    fn test_has_previous_data() {
-        let mut calculator = RateCalculator::new();
-        let now = Instant::now();
 
-        // Initially no data
-        assert!(!calculator.has_previous_data("test"));
 
-        // After first update, should have data
-        calculator.update("test", 100, now);
-        assert!(calculator.has_previous_data("test"));
 
-        // Non-existent key should not have data
-        assert!(!calculator.has_previous_data("nonexistent"));
-    }
 
-    #[test]
-    fn test_reset_functionality() {
-        let mut calculator = RateCalculator::new();
-        let now = Instant::now();
 
-        // Add some data
-        calculator.update("test1", 100, now);
-        calculator.update("test2", 200, now);
-
-        assert!(calculator.has_previous_data("test1"));
-        assert!(calculator.has_previous_data("test2"));
-
-        // Reset should clear all data
-        calculator.reset();
-
-        assert!(!calculator.has_previous_data("test1"));
-        assert!(!calculator.has_previous_data("test2"));
-    }
-
-    #[test]
-    fn test_multiple_measurements() {
-        let mut calculator = RateCalculator::new();
-        let start = Instant::now();
-
-        // First measurement
-        calculator.update("ops", 0, start);
-
-        // Simulate multiple measurements over time
-        let measurements = vec![
-            (100, Duration::from_millis(100)),
-            (250, Duration::from_millis(200)),
-            (400, Duration::from_millis(100)),
-            (600, Duration::from_millis(150)),
-        ];
-
-        for (value, delay) in measurements {
-            thread::sleep(delay);
-            let now = Instant::now();
-            let rate = calculator.calculate_and_update("ops", value, now);
-
-            // Should have a rate after first update
-            if calculator.has_previous_data("ops") {
-                assert!(rate.is_some());
-                assert!(rate.unwrap() >= 0.0); // Rate should be positive for increasing values
-            } else {
-                assert!(rate.is_none());
-            }
-        }
-    }
-
-    #[test]
-    fn test_overflow_protection() {
-        let mut calculator = RateCalculator::new();
-        let now = Instant::now();
-
-        // Test with maximum u64 values to ensure saturating_sub works
-        calculator.update("test", u64::MAX, now);
-
-        // Decreasing from max should use saturating_sub (result should be 0)
-        let rate = calculator
-            .calculate_rate("test", 0, now + Duration::from_secs(1))
-            .unwrap();
-        assert_eq!(rate, 0.0); // saturating_sub prevents underflow
-
-        // Test with very large values
-        calculator.reset();
-        calculator.update("large", u64::MAX / 2, now);
-        let rate = calculator
-            .calculate_rate("large", u64::MAX, now + Duration::from_secs(1))
-            .unwrap();
-        assert!(rate > 0.0);
-    }
 
     #[test]
     fn test_precision_with_small_deltas() {

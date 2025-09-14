@@ -7,13 +7,9 @@ use crate::system::commands::{DemoCommandExecutor, RealCommandExecutor};
 use crate::system::filesystem::{DemoFilesystemReader, RealFilesystemReader};
 use crate::zfs::{CacheStatus, ZfsStatsCollector};
 use std::error::Error;
-use std::fmt;
 use std::io::Write;
 
-/// Main monitoring loop and display coordination
-pub async fn run(demo_mode: bool) -> Result<(), Box<dyn Error>> {
-    run_with_args(demo_mode, None, 2).await
-}
+
 
 /// Main monitoring loop with arguments
 pub async fn run_with_args(
@@ -240,26 +236,4 @@ fn display_footer(_terminal: &Terminal) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Error types for the monitor
-#[derive(Debug)]
-pub enum MonitorError {
-    ZfsUnavailable,
-    PoolNotFound(String),
-    InvalidInterval(String),
-    SystemError(String),
-    ParseError(String),
-}
 
-impl fmt::Display for MonitorError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            MonitorError::ZfsUnavailable => write!(f, "ZFS is not available on this system"),
-            MonitorError::PoolNotFound(pool) => write!(f, "Pool '{}' not found", pool),
-            MonitorError::InvalidInterval(interval) => write!(f, "Invalid interval: {}", interval),
-            MonitorError::SystemError(msg) => write!(f, "System error: {}", msg),
-            MonitorError::ParseError(msg) => write!(f, "Parse error: {}", msg),
-        }
-    }
-}
-
-impl Error for MonitorError {}
